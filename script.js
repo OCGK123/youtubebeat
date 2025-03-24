@@ -62,9 +62,11 @@ const DIFFICULTY_SETTINGS = {
 
 // YouTube API 초기화
 function onYouTubeIframeAPIReady() {
+    console.log("YouTube API 준비 완료");
     player = new YT.Player('youtube-player', {
         height: '100%',
         width: '100%',
+        videoId: 'M7lc1UVf-VE', // 기본 비디오 ID (나중에 변경됨)
         playerVars: {
             'playsinline': 1,
             'controls': 0,
@@ -72,7 +74,8 @@ function onYouTubeIframeAPIReady() {
             'showinfo': 0,
             'rel': 0,
             'iv_load_policy': 3,
-            'fs': 0
+            'fs': 0,
+            'origin': window.location.origin
         },
         events: {
             'onReady': onPlayerReady,
@@ -83,10 +86,17 @@ function onYouTubeIframeAPIReady() {
 
 // 플레이어 준비 완료 이벤트
 function onPlayerReady(event) {
+    console.log("플레이어 준비 완료");
     const loadBtn = document.getElementById('load-btn');
     const startBtn = document.getElementById('start-btn');
     const difficultySelect = document.getElementById('difficulty');
     
+    // 기존 이벤트 리스너 제거(중복 방지)
+    loadBtn.removeEventListener('click', loadVideo);
+    startBtn.removeEventListener('click', startGame);
+    difficultySelect.removeEventListener('change', updateDifficulty);
+    
+    // 새 이벤트 리스너 추가
     loadBtn.addEventListener('click', loadVideo);
     startBtn.addEventListener('click', startGame);
     difficultySelect.addEventListener('change', updateDifficulty);
@@ -172,10 +182,52 @@ function loadVideo() {
         return;
     }
     
-    player.loadVideoById(videoId);
-    player.pauseVideo();
+    console.log("비디오 ID 로드: " + videoId);
+    
+    // 플레이어가 준비되었는지 확인
+    if (player && typeof player.cueVideoById === 'function') {
+        player.cueVideoById(videoId);
+        player.pauseVideo();
+    } else {
+        console.error("YouTube 플레이어가 준비되지 않았습니다.");
+        // 플레이어가 준비되지 않은 경우 다시 초기화 시도
+        reinitializePlayer(videoId);
+    }
     
     document.getElementById('start-btn').disabled = false;
+}
+
+// 플레이어 재초기화 함수
+function reinitializePlayer(videoId) {
+    const playerContainer = document.getElementById('youtube-player');
+    // 기존 iframe 제거
+    while (playerContainer.firstChild) {
+        playerContainer.removeChild(playerContainer.firstChild);
+    }
+    
+    // 새 플레이어 생성
+    player = new YT.Player('youtube-player', {
+        height: '100%',
+        width: '100%',
+        videoId: videoId,
+        playerVars: {
+            'playsinline': 1,
+            'controls': 0,
+            'disablekb': 1,
+            'showinfo': 0,
+            'rel': 0,
+            'iv_load_policy': 3,
+            'fs': 0,
+            'origin': window.location.origin
+        },
+        events: {
+            'onReady': function(event) {
+                console.log("플레이어 재초기화 완료");
+                document.getElementById('start-btn').disabled = false;
+            },
+            'onStateChange': onPlayerStateChange
+        }
+    });
 }
 
 // 유튜브 URL에서 비디오 ID 추출
@@ -585,10 +637,17 @@ function showHitFeedback(laneIndex, hitType) {
 
 // 페이지 로드 시 초기화
 window.addEventListener('load', function() {
-    // YouTube API가 준비되면 onYouTubeIframeAPIReady를 호출
+    console.log("페이지 로드 완료");
     
+    // YouTube API가 준비되면 onYouTubeIframeAPIReady가 자동으로 호출됨
     // API가 이미 로드된 경우를 위한 대체
     if (window.YT && window.YT.Player) {
+        console.log("YouTube API가 이미 로드됨");
         onYouTubeIframeAPIReady();
+    } else {
+        console.log("YouTube API 로딩 대기 중...");
     }
+    
+    // 디버그용 콘솔 로그
+    console.log("2222");
 });
