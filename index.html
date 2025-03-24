@@ -3,56 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>유튜브 리듬게임</title>
+    <title>BeaTube - 유튜브 기반 리듬게임</title>
     <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
 </head>
 <body>
-    <div class="container">
-        <div class="game-header">
-            <h1>유튜브 기반 리듬게임</h1>
-            <div class="controls">
-                <input type="text" id="youtube-url" placeholder="유튜브 URL 입력">
-                <button id="load-btn">영상 불러오기</button>
-                <button id="start-btn" disabled>게임 시작</button>
-                <div class="difficulty-controls">
-                    <label for="difficulty">난이도:</label>
-                    <select id="difficulty">
-                        <option value="easy">쉬움</option>
-                        <option value="normal" selected>보통</option>
-                        <option value="hard">어려움</option>
-                    </select>
+    <div class="game-wrapper">
+        <!-- 게임 시작 화면 -->
+        <div class="start-screen" id="start-screen">
+            <div class="logo-container">
+                <h1 class="game-logo">BeaTube</h1>
+                <p class="tagline">YouTube 기반 리듬게임</p>
+            </div>
+            
+            <div class="start-controls">
+                <div class="url-input-container">
+                    <input type="text" id="youtube-url" placeholder="유튜브 URL을 입력하세요">
+                    <button id="load-btn" class="glow-btn">영상 로드</button>
+                </div>
+                
+                <div class="game-options">
+                    <div class="option-group">
+                        <label for="difficulty">난이도</label>
+                        <select id="difficulty">
+                            <option value="easy">EASY</option>
+                            <option value="normal" selected>NORMAL</option>
+                            <option value="hard">HARD</option>
+                            <option value="extreme">EXTREME</option>
+                        </select>
+                    </div>
+                    
+                    <div class="option-group">
+                        <label for="speed">노트 속도</label>
+                        <select id="speed">
+                            <option value="0.8">0.8x</option>
+                            <option value="1.0" selected>1.0x</option>
+                            <option value="1.2">1.2x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2.0">2.0x</option>
+                        </select>
+                    </div>
+                    
+                    <div class="option-group">
+                        <label for="sync-offset">싱크 조정</label>
+                        <div class="sync-controls">
+                            <button id="sync-minus" class="sync-btn">-</button>
+                            <span id="sync-value">0ms</span>
+                            <button id="sync-plus" class="sync-btn">+</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <button id="start-btn" class="glow-btn" disabled>게임 시작</button>
+            </div>
+            
+            <div class="preview-container">
+                <div id="preview-player"></div>
+            </div>
+            
+            <div class="key-guide">
+                <div class="guide-text">플레이 키:</div>
+                <div class="key-container">
+                    <div class="key"><span>S</span></div>
+                    <div class="key"><span>D</span></div>
+                    <div class="key"><span>F</span></div>
+                    <div class="key"><span>J</span></div>
+                    <div class="key"><span>K</span></div>
+                    <div class="key"><span>L</span></div>
                 </div>
             </div>
         </div>
         
-        <div class="game-container">
-            <div id="youtube-player"></div>
-            <div id="game-canvas">
-                <div class="note-lanes">
-                    <div class="lane" id="lane-1"></div>
-                    <div class="lane" id="lane-2"></div>
-                    <div class="lane" id="lane-3"></div>
-                    <div class="lane" id="lane-4"></div>
+        <!-- 게임 플레이 화면 -->
+        <div class="game-screen" id="game-screen">
+            <div class="game-header">
+                <div class="song-info">
+                    <div id="song-title">노래 제목</div>
+                    <div id="artist-name">아티스트</div>
                 </div>
-                <div class="hit-zone"></div>
+                <div class="game-stats">
+                    <div class="stat-container">
+                        <div class="stat-label">SCORE</div>
+                        <div class="stat-value" id="score">0</div>
+                    </div>
+                    <div class="stat-container">
+                        <div class="stat-label">COMBO</div>
+                        <div class="stat-value" id="combo">0</div>
+                    </div>
+                    <div class="stat-container">
+                        <div class="stat-label">ACCURACY</div>
+                        <div class="stat-value" id="accuracy">0%</div>
+                    </div>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div class="game-container">
+                <div class="youtube-container">
+                    <div id="youtube-player"></div>
+                    <div class="visualizer-container">
+                        <canvas id="visualizer"></canvas>
+                    </div>
+                </div>
+                
+                <div class="gameplay-container">
+                    <div id="game-canvas">
+                        <div class="judgement-line"></div>
+                        <div class="note-lanes">
+                            <div class="lane" id="lane-1"></div>
+                            <div class="lane" id="lane-2"></div>
+                            <div class="lane" id="lane-3"></div>
+                            <div class="lane" id="lane-4"></div>
+                            <div class="lane" id="lane-5"></div>
+                            <div class="lane" id="lane-6"></div>
+                        </div>
+                        <div class="key-indicators">
+                            <div class="key-indicator" data-key="s">S</div>
+                            <div class="key-indicator" data-key="d">D</div>
+                            <div class="key-indicator" data-key="f">F</div>
+                            <div class="key-indicator" data-key="j">J</div>
+                            <div class="key-indicator" data-key="k">K</div>
+                            <div class="key-indicator" data-key="l">L</div>
+                        </div>
+                    </div>
+                    
+                    <div class="judgement-display" id="judgement-display">
+                        <div class="judgement-text"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="pause-menu" id="pause-menu">
+                <div class="pause-content">
+                    <h2>일시 정지</h2>
+                    <button id="resume-btn" class="menu-btn">게임 계속하기</button>
+                    <button id="restart-btn" class="menu-btn">처음부터 다시</button>
+                    <button id="return-btn" class="menu-btn">메인 화면으로</button>
+                </div>
             </div>
         </div>
         
-        <div class="game-stats">
-            <div class="score">점수: <span id="score">0</span></div>
-            <div class="combo">콤보: <span id="combo">0</span></div>
-            <div class="accuracy">정확도: <span id="accuracy">0</span>%</div>
-        </div>
-        
-        <div class="key-guide">
-            <div class="key">D</div>
-            <div class="key">F</div>
-            <div class="key">J</div>
-            <div class="key">K</div>
+        <!-- 결과 화면 -->
+        <div class="result-screen" id="result-screen">
+            <div class="result-content">
+                <h2>게임 결과</h2>
+                <div class="result-stats">
+                    <div class="result-stat">
+                        <div class="stat-label">점수</div>
+                        <div class="stat-value" id="result-score">0</div>
+                    </div>
+                    <div class="result-stat">
+                        <div class="stat-label">최대 콤보</div>
+                        <div class="stat-value" id="result-max-combo">0</div>
+                    </div>
+                    <div class="result-stat">
+                        <div class="stat-label">정확도</div>
+                        <div class="stat-value" id="result-accuracy">0%</div>
+                    </div>
+                </div>
+                
+                <div class="judgement-breakdown">
+                    <div class="judgement-item">
+                        <div class="judgement-name perfect">PERFECT</div>
+                        <div class="judgement-count" id="perfect-count">0</div>
+                    </div>
+                    <div class="judgement-item">
+                        <div class="judgement-name great">GREAT</div>
+                        <div class="judgement-count" id="great-count">0</div>
+                    </div>
+                    <div class="judgement-item">
+                        <div class="judgement-name good">GOOD</div>
+                        <div class="judgement-count" id="good-count">0</div>
+                    </div>
+                    <div class="judgement-item">
+                        <div class="judgement-name miss">MISS</div>
+                        <div class="judgement-count" id="miss-count">0</div>
+                    </div>
+                </div>
+                
+                <div class="performance-graph-container">
+                    <canvas id="performance-graph"></canvas>
+                </div>
+                
+                <div class="result-buttons">
+                    <button id="retry-btn" class="result-btn">다시 플레이</button>
+                    <button id="home-btn" class="result-btn">메인 화면으로</button>
+                </div>
+            </div>
         </div>
     </div>
-
-    <!-- JS 파일 로드 간소화 -->
+    
     <script src="script.js"></script>
 </body>
 </html>
