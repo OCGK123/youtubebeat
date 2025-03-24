@@ -1,10 +1,10 @@
 // 전역 변수
 let player = null;
 let audioContext = null;
+let mediaRecorder = null;
 let audioAnalyser = null;
-let audioSource = null;
+let audioStream = null;
 let frequencyData = null;
-let timeDomainData = null;
 let gameMode = 'waiting'; // waiting, playing, paused, result
 let notes = [];
 let score = 0;
@@ -30,23 +30,26 @@ const config = {
 // 난이도 설정
 const DIFFICULTY_SETTINGS = {
     easy: {
-        bassTrigger: 1.4,
-        midTrigger: 1.5,
-        highTrigger: 1.6,
-        minInterval: 400, // 최소 노트 간격 (ms)
-        longNoteChance: 0.2 // 롱노트 생성 확률
+        energyThreshold: 0.6,
+        bassThreshold: 160,
+        midThreshold: 140,
+        highThreshold: 120,
+        minInterval: 400,  // 최소 노트 간격 (ms)
+        longNoteChance: 0.2
     },
     normal: {
-        bassTrigger: 1.3,
-        midTrigger: 1.4,
-        highTrigger: 1.5,
+        energyThreshold: 0.5,
+        bassThreshold: 150,
+        midThreshold: 130,
+        highThreshold: 110,
         minInterval: 300,
         longNoteChance: 0.3
     },
     hard: {
-        bassTrigger: 1.2,
-        midTrigger: 1.3,
-        highTrigger: 1.4,
+        energyThreshold: 0.4,
+        bassThreshold: 140,
+        midThreshold: 120,
+        highThreshold: 100,
         minInterval: 200,
         longNoteChance: 0.4
     }
@@ -55,9 +58,7 @@ const DIFFICULTY_SETTINGS = {
 // 오디오 분석 설정
 const AUDIO_CONFIG = {
     fftSize: 2048,
-    smoothingTimeConstant: 0.8,
-    minDecibels: -100,
-    maxDecibels: -30,
+    smoothingTimeConstant: 0.85,
     bassRange: [20, 250],    // 베이스 주파수 범위 (Hz)
     midRange: [250, 2000],   // 중간 주파수 범위 (Hz)
     highRange: [2000, 8000]  // 고음 주파수 범위 (Hz)
@@ -95,6 +96,11 @@ let lastNoteTime = {
     high: 0
 };
 
+// 오디오 레벨 검사를 위한 데이터
+let noAudioFrames = 0;
+const MAX_NO_AUDIO_FRAMES = 120; // 2초 동안 오디오 감지 안되면 경고 
+let hasAudioContent = false;
+
 // 현재 누르고 있는 키 트래킹
 let pressedKeys = {
     d: false,
@@ -113,6 +119,9 @@ let gameCanvas;
 let lanes = [];
 let judgmentDisplay;
 let keyIndicators = [];
+
+// 진행 중인 롱노트
+let activeHoldNotes = [null, null, null, null];
 
 // YouTube API 로드
 function loadYouTubeAPI() {
@@ -177,8 +186,10 @@ function onPlayerStateChange(event) {
     // 상태: -1(미시작), 0(종료), 1(재생), 2(일시정지), 3(버퍼링), 5(큐)
     if (event.data === YT.PlayerState.PLAYING && gameMode === 'playing') {
         console.log("비디오 재생 중");
+        
+        // 오디오 분석 시작
         if (!audioContext) {
-            setupAudioAnalysis();
+            setupAudioCapture();
         }
     } else if (event.data === YT.PlayerState.PAUSED && gameMode === 'playing') {
         console.log("비디오 일시정지");
@@ -204,87 +215,139 @@ function onPlayerError(event) {
     alert("YouTube 오류: " + (errorCodes[event.data] || "알 수 없는 오류가 발생했습니다."));
 }
 
-// 오디오 분석 설정
-function setupAudioAnalysis() {
-    if (audioContext) {
-        // 이미 설정된 경우 다시 시작
-        console.log("오디오 분석 재시작");
-        startAudioAnalysis();
-        return;
-    }
-    
+// 오디오 캡처 설정
+async function setupAudioCapture() {
     try {
-        console.log("오디오 분석 설정 시작");
+        console.log("오디오 캡처 설정 시작");
         
         // AudioContext 생성
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         
-        // 유튜브 플레이어 iframe에서 오디오 요소 접근
-        const iframe = document.querySelector('iframe');
-        if (!iframe) {
-            throw new Error("YouTube iframe을 찾을 수 없습니다.");
+        // 시스템 오디오 출력 캡처 (사용자 오디오 권한 필요)
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+            alert("이 브라우저는 화면 공유 기능을 지원하지 않습니다. 시뮬레이션 모드로 진행합니다.");
+            setupMicrophoneCapture();
+            return;
         }
         
-        // iframe 내부의 비디오 요소에 접근
-        const iframeDocument = iframe.contentDocument || iframe.contentWindow.document;
-        if (!iframeDocument) {
-            throw new Error("보안 정책으로 인해 iframe 내부에 직접 접근할 수 없습니다.");
-            // 이 경우 대체 방법 사용
+        try {
+            // 화면 공유 요청 (탭 오디오 포함)
+            audioStream = await navigator.mediaDevices.getDisplayMedia({
+                video: {
+                    displaySurface: "browser",
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                },
+                audio: true
+            });
+            
+            // 오디오 트랙 확인
+            const audioTracks = audioStream.getAudioTracks();
+            if (audioTracks.length === 0) {
+                console.log("오디오 트랙이 없습니다. 마이크 캡처로 전환합니다.");
+                stopAudioCapture();
+                setupMicrophoneCapture();
+                return;
+            }
+            
+            console.log("오디오 캡처 성공:", audioTracks[0].label);
+            
+            // 비디오 트랙은 중지 (오디오만 필요)
+            const videoTracks = audioStream.getVideoTracks();
+            videoTracks.forEach(track => track.stop());
+            
+            // 오디오 분석기 설정
+            setupAudioAnalyzer(audioStream);
+        } catch (err) {
+            console.error("화면 공유 오류:", err);
+            alert("화면 공유를 거부했습니다. 시뮬레이션 모드로 진행합니다.");
+            setupMicrophoneCapture();
         }
-        
-        // 대체 분석 방법 설정
-        console.log("대체 오디오 분석 방법 사용");
-        
-        // 분석기 노드 생성
-        audioAnalyser = audioContext.createAnalyser();
-        audioAnalyser.fftSize = AUDIO_CONFIG.fftSize;
-        audioAnalyser.smoothingTimeConstant = AUDIO_CONFIG.smoothingTimeConstant;
-        audioAnalyser.minDecibels = AUDIO_CONFIG.minDecibels;
-        audioAnalyser.maxDecibels = AUDIO_CONFIG.maxDecibels;
-        
-        // 더미 오실레이터 소스 (실제 오디오 분석이 불가능한 경우)
-        const oscillator = audioContext.createOscillator();
-        oscillator.frequency.setValueAtTime(440, audioContext.currentTime);
-        oscillator.connect(audioAnalyser);
-        oscillator.start();
-        
-        // 주파수 데이터 배열 생성
-        const bufferLength = audioAnalyser.frequencyBinCount;
-        frequencyData = new Uint8Array(bufferLength);
-        timeDomainData = new Uint8Array(bufferLength);
-        
-        console.log("오디오 분석 설정 완료");
-        
-        // 오디오 분석 시작
-        startAudioAnalysis();
     } catch (error) {
-        console.error("오디오 분석 설정 오류:", error);
+        console.error("오디오 캡처 설정 오류:", error);
+        alert("오디오 캡처를 설정할 수 없습니다. 시뮬레이션 모드로 진행합니다.");
+        setupMicrophoneCapture();
+    }
+}
+
+// 마이크 캡처 설정 (대체 방법)
+async function setupMicrophoneCapture() {
+    try {
+        console.log("마이크 캡처 설정 시작");
         
-        // 오류 발생 시 시뮬레이션 모드로 전환
-        alert("오디오 분석을 설정할 수 없습니다. 비트 감지 시뮬레이션 모드로 진행합니다.");
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        try {
+            // 마이크 접근 요청
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.log("마이크 캡처 성공");
+            
+            // 오디오 분석기 설정
+            setupAudioAnalyzer(audioStream);
+        } catch (err) {
+            console.error("마이크 접근 오류:", err);
+            alert("마이크 접근을 거부했습니다. 주파수 감지 시뮬레이션 모드로 진행합니다.");
+            setupSimulatedAnalysis();
+        }
+    } catch (error) {
+        console.error("마이크 캡처 설정 오류:", error);
         setupSimulatedAnalysis();
     }
+}
+
+// 오디오 분석기 설정
+function setupAudioAnalyzer(stream) {
+    if (!audioContext) return;
+    
+    // 오디오 소스 생성
+    const source = audioContext.createMediaStreamSource(stream);
+    
+    // 분석기 생성
+    audioAnalyser = audioContext.createAnalyser();
+    audioAnalyser.fftSize = AUDIO_CONFIG.fftSize;
+    audioAnalyser.smoothingTimeConstant = AUDIO_CONFIG.smoothingTimeConstant;
+    
+    // 소스를 분석기에 연결
+    source.connect(audioAnalyser);
+    
+    // 주파수 데이터 배열 생성
+    frequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+    
+    console.log("오디오 분석기 설정 완료");
+    
+    // 오디오 분석 시작
+    startAudioAnalysis();
 }
 
 // 시뮬레이션된 오디오 분석 설정
 function setupSimulatedAnalysis() {
     console.log("시뮬레이션된 오디오 분석 설정");
     
-    // 더미 분석기 생성
     if (!audioContext) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
     }
     
+    // 더미 분석기 생성
     audioAnalyser = audioContext.createAnalyser();
     audioAnalyser.fftSize = AUDIO_CONFIG.fftSize;
     
     // 주파수 데이터 배열 생성
-    const bufferLength = audioAnalyser.frequencyBinCount;
-    frequencyData = new Uint8Array(bufferLength);
-    timeDomainData = new Uint8Array(bufferLength);
+    frequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
     
-    // 시뮬레이션 시작
+    console.log("시뮬레이션된 분석기 설정 완료");
+    
+    // 오디오 분석 시작
     startAudioAnalysis();
+}
+
+// 오디오 캡처 중지
+function stopAudioCapture() {
+    if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+    }
 }
 
 // 오디오 분석 시작
@@ -301,102 +364,156 @@ function startAudioAnalysis() {
 // 오디오 분석 및 비트 감지
 function analyzeAudio() {
     if (gameMode !== 'playing') {
-        // 게임이 진행 중이 아니면 분석 중지
         return;
     }
     
-    // 현재 비디오 시간
-    const currentVideoTime = player.getCurrentTime();
-    const currentTime = Date.now();
-    
-    // 주파수 데이터 가져오기 (또는 시뮬레이션)
-    updateAudioData(currentVideoTime);
-    
-    // 비트 감지 및 노트 생성
-    detectBeatsAndCreateNotes(currentTime);
+    // 주파수 데이터 가져오기
+    if (audioAnalyser) {
+        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            // 실제 오디오 데이터 획득
+            audioAnalyser.getByteFrequencyData(frequencyData);
+            
+            // 오디오 데이터가 있는지 확인
+            const hasAudio = checkForAudioContent();
+            
+            if (hasAudio) {
+                // 비트 감지 및 노트 생성
+                detectBeatsAndCreateNotes();
+                noAudioFrames = 0;
+                hasAudioContent = true;
+            } else {
+                noAudioFrames++;
+                
+                // 일정 시간 동안 오디오가 감지되지 않으면 경고
+                if (noAudioFrames > MAX_NO_AUDIO_FRAMES && !hasAudioContent) {
+                    console.warn("오디오가 감지되지 않습니다! 시스템 오디오 설정을 확인하세요.");
+                    if (!document.getElementById('audio-warning')) {
+                        showAudioWarning();
+                    }
+                }
+            }
+        } else {
+            simulateFrequencyData();
+        }
+    } else {
+        simulateFrequencyData();
+    }
     
     // 다음 분석 예약 (약 60fps)
     audioAnalysisTimer = setTimeout(analyzeAudio, 16);
 }
 
-// 오디오 데이터 업데이트 (실제 또는 시뮬레이션)
-function updateAudioData(currentVideoTime) {
-    if (audioAnalyser) {
-        // 주파수 데이터 업데이트
-        audioAnalyser.getByteFrequencyData(frequencyData);
-        audioAnalyser.getByteTimeDomainData(timeDomainData);
-    } else {
-        // 시뮬레이션 데이터 생성
-        simulateAudioData(currentVideoTime);
+// 오디오 콘텐츠 체크
+function checkForAudioContent() {
+    if (!frequencyData) return false;
+    
+    let totalEnergy = 0;
+    
+    // 전체 주파수 대역의 에너지 합산
+    for (let i = 0; i < frequencyData.length; i++) {
+        totalEnergy += frequencyData[i];
     }
+    
+    // 평균 에너지 계산
+    const avgEnergy = totalEnergy / frequencyData.length;
+    
+    // 일정 수준 이상 에너지가 있으면 오디오가 있다고 판단
+    return avgEnergy > 10; // 임계값 설정
 }
 
-// 오디오 데이터 시뮬레이션
-function simulateAudioData(currentVideoTime) {
-    // 시뮬레이션된 주파수 데이터 생성
-    const time = currentVideoTime;
+// 오디오 경고 표시
+function showAudioWarning() {
+    const warning = document.createElement('div');
+    warning.id = 'audio-warning';
+    warning.className = 'audio-warning';
+    warning.textContent = '오디오가 감지되지 않습니다. 유튜브 탭의 오디오를 공유하세요!';
     
-    // 기본 비트 패턴 (4/4 박자 시뮬레이션)
-    const beatIntensity = Math.sin(time * Math.PI * 2) * 0.5 + 0.5;
+    document.body.appendChild(warning);
     
-    // 비트 패턴에 따른 변화
-    const bassIntensity = beatIntensity * 255;
-    const midIntensity = (Math.sin(time * Math.PI * 4) * 0.5 + 0.5) * 200;
-    const highIntensity = (Math.sin(time * Math.PI * 8) * 0.5 + 0.5) * 150;
-    
-    // 주파수 대역별로 데이터 설정
-    for (let i = 0; i < frequencyData.length; i++) {
-        const normalizedIndex = i / frequencyData.length;
-        
-        if (normalizedIndex < 0.2) {
-            // 저음역 대역
-            frequencyData[i] = Math.min(255, bassIntensity + Math.random() * 30);
-        } else if (normalizedIndex < 0.6) {
-            // 중음역 대역
-            frequencyData[i] = Math.min(255, midIntensity + Math.random() * 20);
-        } else {
-            // 고음역 대역
-            frequencyData[i] = Math.min(255, highIntensity + Math.random() * 20);
+    // 5초 후 경고 제거
+    setTimeout(() => {
+        if (warning.parentNode) {
+            warning.parentNode.removeChild(warning);
         }
-    }
+    }, 5000);
+}
+
+// 주파수 데이터 시뮬레이션
+function simulateFrequencyData() {
+    if (!frequencyData) return;
     
-    // 파형 데이터 시뮬레이션 (사인파)
-    for (let i = 0; i < timeDomainData.length; i++) {
-        const phase = (i / timeDomainData.length) * Math.PI * 2;
-        timeDomainData[i] = 128 + Math.sin(phase + time * 10) * 64;
+    // 비디오가 재생 중이면 실제같은 주파수 데이터 생성
+    // 아니면 빈 데이터 생성
+    if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+        const currentTime = player.getCurrentTime();
+        
+        // 기본 비트 패턴 (4/4 박자 시뮬레이션)
+        const beatPhase = (currentTime % 2) / 2; // 0-1 사이 값
+        const beatIntensity = Math.sin(beatPhase * Math.PI * 2) * 0.5 + 0.5;
+        
+        // BPM에 따른 강약 조절 
+        const bpm = 120; // 기본 BPM
+        const beatInterval = 60 / bpm;
+        const beatPosition = (currentTime % beatInterval) / beatInterval;
+        const beatEmphasis = beatPosition < 0.1 ? 1.0 : (beatPosition < 0.3 ? 0.7 : 0.4);
+        
+        for (let i = 0; i < frequencyData.length; i++) {
+            const normalizedIndex = i / frequencyData.length;
+            let value = 0;
+            
+            if (normalizedIndex < 0.2) { // 저음역
+                value = beatIntensity * beatEmphasis * 200 + Math.random() * 30;
+            } else if (normalizedIndex < 0.6) { // 중음역
+                value = beatIntensity * beatEmphasis * 150 + Math.random() * 20;
+            } else { // 고음역
+                value = beatIntensity * beatEmphasis * 100 + Math.random() * 10;
+            }
+            
+            frequencyData[i] = Math.min(255, value);
+        }
+    } else {
+        // 비디오가 재생 중이 아니면 빈 데이터
+        for (let i = 0; i < frequencyData.length; i++) {
+            frequencyData[i] = 0;
+        }
     }
 }
 
 // 주파수 범위 에너지 계산
 function calculateFrequencyRangeEnergy(minFreq, maxFreq) {
+    if (!frequencyData || !audioContext) return 0;
+    
     // 주파수 인덱스 계산
     const nyquist = audioContext.sampleRate / 2;
-    const minIndex = Math.floor((minFreq / nyquist) * (frequencyData.length));
-    const maxIndex = Math.floor((maxFreq / nyquist) * (frequencyData.length));
+    const minIndex = Math.floor((minFreq / nyquist) * (frequencyData.length / 2));
+    const maxIndex = Math.floor((maxFreq / nyquist) * (frequencyData.length / 2));
     
     let totalEnergy = 0;
-    let count = 0;
+    let peakValue = 0;
     
-    // 해당 범위의 주파수 에너지 합산
+    // 해당 범위의 주파수 에너지 계산 및 피크 감지
     for (let i = minIndex; i <= maxIndex && i < frequencyData.length; i++) {
-        totalEnergy += frequencyData[i] * frequencyData[i];
-        count++;
+        totalEnergy += frequencyData[i];
+        if (frequencyData[i] > peakValue) {
+            peakValue = frequencyData[i];
+        }
     }
     
-    // 평균 에너지 반환
-    return count > 0 ? totalEnergy / count : 0;
-}
-
-// 히스토리 기반 평균 에너지 계산
-function calculateAverageEnergy(history) {
-    if (history.length === 0) return 0;
+    // 평균 에너지와 피크 값의 가중 평균
+    const numBins = (maxIndex - minIndex + 1) || 1;
+    const avgEnergy = totalEnergy / numBins;
     
-    const sum = history.reduce((total, current) => total + current, 0);
-    return sum / history.length;
+    // 평균과 피크의 가중 평균 (피크에 가중치 부여)
+    return (avgEnergy * 0.4) + (peakValue * 0.6);
 }
 
 // 비트 감지 및 노트 생성
-function detectBeatsAndCreateNotes(currentTime) {
+function detectBeatsAndCreateNotes() {
+    if (!frequencyData) return;
+    
+    const currentTime = Date.now();
+    const settings = DIFFICULTY_SETTINGS[config.difficulty];
+    
     // 각 주파수 범위별 에너지 계산
     const bassEnergy = calculateFrequencyRangeEnergy(AUDIO_CONFIG.bassRange[0], AUDIO_CONFIG.bassRange[1]);
     const midEnergy = calculateFrequencyRangeEnergy(AUDIO_CONFIG.midRange[0], AUDIO_CONFIG.midRange[1]);
@@ -407,7 +524,7 @@ function detectBeatsAndCreateNotes(currentTime) {
     energyHistory.mid.push(midEnergy);
     energyHistory.high.push(highEnergy);
     
-    // 히스토리 크기 제한 (지난 30프레임)
+    // 히스토리 크기 제한 (지난 30프레임 = 약 0.5초)
     const historyLimit = 30;
     if (energyHistory.bass.length > historyLimit) energyHistory.bass.shift();
     if (energyHistory.mid.length > historyLimit) energyHistory.mid.shift();
@@ -418,15 +535,15 @@ function detectBeatsAndCreateNotes(currentTime) {
     const avgMidEnergy = calculateAverageEnergy(energyHistory.mid);
     const avgHighEnergy = calculateAverageEnergy(energyHistory.high);
     
-    // 난이도 설정 가져오기
-    const settings = DIFFICULTY_SETTINGS[config.difficulty];
-    
-    // 최소 노트 간격 확인
-    const minInterval = settings.minInterval;
+    // 디버그 로그 (필요시)
+    // console.log(`Bass: ${bassEnergy.toFixed(1)}/${avgBassEnergy.toFixed(1)}, Mid: ${midEnergy.toFixed(1)}/${avgMidEnergy.toFixed(1)}, High: ${highEnergy.toFixed(1)}/${avgHighEnergy.toFixed(1)}`);
     
     // 저음역(베이스) 비트 감지
-    if (bassEnergy > avgBassEnergy * settings.bassTrigger && 
-        currentTime - lastNoteTime.bass > minInterval) {
+    // 현재 에너지가 평균보다 훨씬 높고, 절대적으로도 충분히 높으면 비트로 간주
+    if (bassEnergy > avgBassEnergy * 1.3 && 
+        bassEnergy > settings.bassThreshold && 
+        currentTime - lastNoteTime.bass > settings.minInterval) {
+        
         // 베이스 비트에 노트 생성 (0, 1번 레인)
         const lane = Math.floor(Math.random() * 2);
         
@@ -439,8 +556,10 @@ function detectBeatsAndCreateNotes(currentTime) {
     }
     
     // 중음역 비트 감지
-    if (midEnergy > avgMidEnergy * settings.midTrigger && 
-        currentTime - lastNoteTime.mid > minInterval) {
+    if (midEnergy > avgMidEnergy * 1.3 && 
+        midEnergy > settings.midThreshold && 
+        currentTime - lastNoteTime.mid > settings.minInterval) {
+        
         // 중음역 비트에 노트 생성 (주로 1, 2번 레인)
         const lane = Math.floor(Math.random() * 2) + 1;
         
@@ -453,8 +572,10 @@ function detectBeatsAndCreateNotes(currentTime) {
     }
     
     // 고음역 비트 감지
-    if (highEnergy > avgHighEnergy * settings.highTrigger && 
-        currentTime - lastNoteTime.high > minInterval) {
+    if (highEnergy > avgHighEnergy * 1.3 && 
+        highEnergy > settings.highThreshold && 
+        currentTime - lastNoteTime.high > settings.minInterval) {
+        
         // 고음역 비트에 노트 생성 (주로 2, 3번 레인)
         const lane = Math.floor(Math.random() * 2) + 2;
         
@@ -465,6 +586,22 @@ function detectBeatsAndCreateNotes(currentTime) {
         createNote(lane, isLongNote, noteDuration);
         lastNoteTime.high = currentTime;
     }
+}
+
+// 히스토리 기반 평균 에너지 계산
+function calculateAverageEnergy(history) {
+    if (!history || history.length === 0) return 0;
+    
+    // 상위 10% 값 제외한 평균 계산 (이상치 제거)
+    const sortedHistory = [...history].sort((a, b) => a - b);
+    const validCount = Math.floor(sortedHistory.length * 0.9);
+    
+    let sum = 0;
+    for (let i = 0; i < validCount; i++) {
+        sum += sortedHistory[i];
+    }
+    
+    return validCount > 0 ? sum / validCount : 0;
 }
 
 // 유튜브 URL에서 비디오 ID 추출
@@ -593,9 +730,6 @@ function beginGameplay() {
     
     // ESC 키 이벤트 추가
     window.addEventListener('keydown', handleEscKey);
-    
-    // 오디오 분석 시작
-    setupAudioAnalysis();
     
     // 게임 루프 시작
     startGameLoop();
@@ -754,6 +888,9 @@ function updateNotes() {
                 // 롱노트 성공 효과
                 showLongNoteCompleteEffect(note.lane);
                 
+                // 액티브 홀드 노트 해제
+                activeHoldNotes[note.lane] = null;
+                
                 // 노트 배열에서 제거
                 notes.splice(i, 1);
                 
@@ -810,6 +947,9 @@ function updateNotes() {
             
             // 미스 판정 표시
             showJudgment('miss');
+            
+            // 액티브 홀드 노트 해제
+            activeHoldNotes[note.lane] = null;
             
             // 노트 배열에서 제거
             notes.splice(i, 1);
@@ -870,6 +1010,9 @@ function judgeNoteHit(laneIndex) {
         if (closestNote.isLongNote) {
             closestNote.holdActive = true;
             
+            // 액티브 홀드 노트 설정
+            activeHoldNotes[laneIndex] = closestNote;
+            
             // 홀드 시작 시각 효과
             if (closestNote.element) {
                 closestNote.element.classList.add('holding');
@@ -909,55 +1052,50 @@ function judgeNoteHit(laneIndex) {
 
 // 롱노트 키 릴리즈 판정
 function judgeNoteRelease(laneIndex) {
-    // 해당 레인의 활성화된 롱노트 찾기
-    let activeIndex = -1;
-    
-    for (let i = 0; i < notes.length; i++) {
-        const note = notes[i];
-        
-        if (note.lane === laneIndex && note.isLongNote && note.hit && !note.endHit && note.holdActive) {
-            activeIndex = i;
-            break;
-        }
-    }
+    // 해당 레인의 활성화된 롱노트 확인
+    const activeNote = activeHoldNotes[laneIndex];
     
     // 활성화된 롱노트가 있으면 홀드 상태 해제
-    if (activeIndex !== -1) {
-        const note = notes[activeIndex];
-        note.holdActive = false;
+    if (activeNote) {
+        activeNote.holdActive = false;
         
         // 홀드 중 클래스 제거
-        if (note.element) {
-            note.element.classList.remove('holding');
+        if (activeNote.element) {
+            activeNote.element.classList.remove('holding');
         }
         
         // 예상 종료 시간과 현재 시간 비교
         const currentTime = Date.now() + config.syncOffset;
-        const timeToEnd = note.expectedEndTime - currentTime;
+        const timeToEnd = activeNote.expectedEndTime - currentTime;
         
         // 종료 시간이 거의 다 되었으면 (100ms 이내) 성공으로 처리
         if (timeToEnd <= 100) {
             // 롱노트 성공
-            note.endHit = true;
-            
-            // 추가 점수 부여
-            score += JUDGMENT_SCORES.perfect / 2;
-            
-            // 롱노트 성공 효과
-            showLongNoteCompleteEffect(note.lane);
-            
-            // 노트 제거
-            if (note.element && note.element.parentNode) {
-                note.element.remove();
+            const index = notes.indexOf(activeNote);
+            if (index !== -1) {
+                activeNote.endHit = true;
+                
+                // 추가 점수 부여
+                score += JUDGMENT_SCORES.perfect / 2;
+                
+                // 롱노트 성공 효과
+                showLongNoteCompleteEffect(laneIndex);
+                
+                // 노트 제거
+                if (activeNote.element && activeNote.element.parentNode) {
+                    activeNote.element.remove();
+                }
+                
+                // 노트 배열에서 제거
+                notes.splice(index, 1);
+                
+                // 게임 상태 업데이트
+                updateGameStats();
             }
-            
-            // 노트 배열에서 제거
-            notes.splice(activeIndex, 1);
-            
-            // 게임 상태 업데이트
-            updateGameStats();
         }
-        // 그렇지 않으면 홀드 해제만 함 (실패는 updateNotes에서 처리)
+        
+        // 액티브 홀드 노트 해제
+        activeHoldNotes[laneIndex] = null;
     }
 }
 
@@ -1079,6 +1217,9 @@ function restartGame() {
     document.getElementById('pause-menu').classList.add('hidden');
     document.getElementById('result-screen').classList.add('hidden');
     
+    // 오디오 캡처 중지
+    stopAudioCapture();
+    
     // 게임 시작
     startGame();
 }
@@ -1091,6 +1232,9 @@ function quitGame() {
     
     // 비디오 정지
     player.stopVideo();
+    
+    // 오디오 캡처 중지
+    stopAudioCapture();
     
     // 게임 모드 업데이트
     gameMode = 'waiting';
@@ -1110,6 +1254,9 @@ function endGame() {
     if (gameUpdateTimer) {
         clearTimeout(gameUpdateTimer);
     }
+    
+    // 오디오 캡처 중지
+    stopAudioCapture();
     
     // 남은 노트 제거
     notes.forEach(note => {
@@ -1175,6 +1322,10 @@ function resetGame() {
         k: false
     };
     
+    activeHoldNotes = [null, null, null, null];
+    hasAudioContent = false;
+    noAudioFrames = 0;
+    
     // UI 초기화
     document.getElementById('score').textContent = '0';
     document.getElementById('combo').textContent = '0';
@@ -1193,6 +1344,15 @@ function resetGame() {
     // 판정 표시 초기화
     judgmentDisplay.className = '';
     judgmentDisplay.textContent = '';
+    
+    // 오디오 분석기 초기화
+    if (audioContext) {
+        audioContext.close().then(() => {
+            audioContext = null;
+            audioAnalyser = null;
+            frequencyData = null;
+        });
+    }
 }
 
 // 문서 로드 시 초기화
