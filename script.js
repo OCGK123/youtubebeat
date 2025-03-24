@@ -1,5 +1,5 @@
 // 전역 변수
-let player;
+let player = null;
 let audioContext;
 let audioSource;
 let analyzer;
@@ -60,13 +60,200 @@ const DIFFICULTY_SETTINGS = {
     }
 };
 
-// YouTube API 초기화
-function onYouTubeIframeAPIReady() {
-    console.log("YouTube API 준비 완료");
+// 초기화 함수 - 페이지 로드 시 호출
+function initializeGame() {
+    console.log("게임 초기화 시작");
+    
+    // 버튼과 이벤트 리스너 설정
+    const loadBtn = document.getElementById('load-btn');
+    const startBtn = document.getElementById('start-btn');
+    const difficultySelect = document.getElementById('difficulty');
+    
+    loadBtn.addEventListener('click', loadVideo);
+    startBtn.addEventListener('click', startGame);
+    difficultySelect.addEventListener('change', updateDifficulty);
+    
+    // 키 가이드에 키 활성화 이벤트 추가
+    setupKeyGuide();
+    
+    // 초기 난이도 설정 적용
+    updateDifficulty();
+    
+    // YouTube API 로드
+    if (!window.YT) {
+        // API가 아직 로드되지 않은 경우
+        const tag = document.createElement('script');
+        tag.src = "https://www.youtube.com/iframe_api";
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+        console.log("YouTube API 스크립트 로드 중...");
+    } else if (window.YT && window.YT.Player) {
+        // API가 이미 로드된 경우
+        console.log("YouTube API 이미 로드됨");
+        setupPlayer();
+    }
+}
+
+// YouTube API 준비 완료 시 호출되는 함수 (YouTube API에서 자동 호출)
+window.onYouTubeIframeAPIReady = function() {
+    console.log("YouTube IFrame API 준비 완료");
+    setupPlayer();
+};
+
+// YouTube 플레이어 설정
+function setupPlayer() {
+    console.log("YouTube 플레이어 설정 중...");
+    
+    // 이미 생성된 플레이어가 있는지 확인
+    if (player !== null) {
+        console.log("플레이어가 이미 생성되어 있습니다.");
+        return;
+    }
+    
+    // 플레이어 영역 확인
+    const playerContainer = document.getElementById('youtube-player');
+    if (!playerContainer) {
+        console.error("'youtube-player' 요소를 찾을 수 없습니다.");
+        return;
+    }
+    
+    try {
+        player = new YT.Player('youtube-player', {
+            height: '100%',
+            width: '100%',
+            videoId: 'M7lc1UVf-VE', // 기본 데모 비디오
+            playerVars: {
+                'playsinline': 1,
+                'controls': 0,
+                'disablekb': 1,
+                'showinfo': 0,
+                'rel': 0,
+                'iv_load_policy': 3,
+                'fs': 0,
+                'origin': window.location.origin
+            },
+            events: {
+                'onReady': onPlayerReady,
+                'onStateChange': onPlayerStateChange,
+                'onError': onPlayerError
+            }
+        });
+        
+        console.log("플레이어 인스턴스 생성 완료");
+    } catch (error) {
+        console.error("플레이어 생성 중 오류 발생:", error);
+    }
+}
+
+// 플레이어 오류 처리
+function onPlayerError(event) {
+    console.error("YouTube 플레이어 오류:", event.data);
+    alert("YouTube 영상을 로드하는 중 오류가 발생했습니다. 코드: " + event.data);
+}
+
+// 플레이어 준비 완료 이벤트
+function onPlayerReady(event) {
+    console.log("플레이어 준비 완료, 사용 가능한 메서드:", Object.keys(player));
+    document.getElementById('load-btn').disabled = false;
+}
+
+// 플레이어 상태 변경 이벤트
+function onPlayerStateChange(event) {
+    console.log("플레이어 상태 변경:", event.data);
+    
+    if (event.data === YT.PlayerState.PLAYING && isPaused) {
+        console.log("영상 재생 시작");
+        isPaused = false;
+        audioStartTime = Date.now();
+        setupAudioAnalysis();
+    } else if (event.data === YT.PlayerState.PAUSED) {
+        console.log("영상 일시 정지");
+        isPaused = true;
+    } else if (event.data === YT.PlayerState.ENDED) {
+        console.log("영상 종료");
+        endGame();
+    }
+}
+
+// 유튜브 비디오 로드
+function loadVideo() {
+    console.log("비디오 로드 함수 호출됨");
+    
+    const urlInput = document.getElementById('youtube-url');
+    const url = urlInput.value;
+    
+    if (!url) {
+        alert('유튜브 URL을 입력해주세요.');
+        return;
+    }
+    
+    // URL에서 비디오 ID 추출
+    const videoId = extractVideoId(url);
+    if (!videoId) {
+        alert('유효하지 않은 유튜브 URL입니다.');
+        return;
+    }
+    
+    console.log("로드할 비디오 ID:", videoId);
+    
+    // 플레이어 객체 확인
+    if (!player) {
+        console.error("유효한 YouTube 플레이어가 없습니다.");
+        alert("YouTube 플레이어를 초기화하는 중 오류가 발생했습니다. 페이지를 새로고침해 주세요.");
+        return;
+    }
+    
+    try {
+        // 플레이어 메서드 확인 및 비디오 로드
+        if (typeof player.cueVideoById === 'function') {
+            console.log("cueVideoById 메서드 사용");
+            player.cueVideoById(videoId);
+        } else if (typeof player.loadVideoById === 'function') {
+            console.log("loadVideoById 메서드 사용");
+            player.loadVideoById(videoId);
+        } else if (typeof player.cueVideoByUrl === 'function') {
+            console.log("cueVideoByUrl 메서드 사용");
+            player.cueVideoByUrl('https://www.youtube.com/watch?v=' + videoId);
+        } else {
+            // 메서드가 없는 경우 플레이어 재생성
+            console.log("대체 방법으로 플레이어 재생성");
+            recreatePlayer(videoId);
+            return;
+        }
+        
+        // 비디오 일시 정지
+        if (typeof player.pauseVideo === 'function') {
+            player.pauseVideo();
+        }
+        
+        document.getElementById('start-btn').disabled = false;
+    } catch (error) {
+        console.error("비디오 로드 중 오류 발생:", error);
+        alert("비디오를 로드하는 중 오류가 발생했습니다.");
+    }
+}
+
+// 플레이어 재생성
+function recreatePlayer(videoId) {
+    console.log("플레이어 재생성 중...");
+    
+    const playerContainer = document.getElementById('youtube-player');
+    
+    // 기존 iframe 제거
+    while (playerContainer.firstChild) {
+        playerContainer.removeChild(playerContainer.firstChild);
+    }
+    
+    // 새 플레이어 컨테이너 생성
+    const newPlayerDiv = document.createElement('div');
+    newPlayerDiv.id = 'youtube-player';
+    playerContainer.appendChild(newPlayerDiv);
+    
+    // 새 플레이어 인스턴스 생성
     player = new YT.Player('youtube-player', {
         height: '100%',
         width: '100%',
-        videoId: 'M7lc1UVf-VE', // 기본 비디오 ID (나중에 변경됨)
+        videoId: videoId,
         playerVars: {
             'playsinline': 1,
             'controls': 0,
@@ -78,34 +265,25 @@ function onYouTubeIframeAPIReady() {
             'origin': window.location.origin
         },
         events: {
-            'onReady': onPlayerReady,
-            'onStateChange': onPlayerStateChange
+            'onReady': function(event) {
+                console.log("새 플레이어 준비 완료");
+                event.target.pauseVideo();
+                document.getElementById('start-btn').disabled = false;
+            },
+            'onStateChange': onPlayerStateChange,
+            'onError': onPlayerError
         }
     });
 }
 
-// 플레이어 준비 완료 이벤트
-function onPlayerReady(event) {
-    console.log("플레이어 준비 완료");
-    const loadBtn = document.getElementById('load-btn');
-    const startBtn = document.getElementById('start-btn');
-    const difficultySelect = document.getElementById('difficulty');
-    
-    // 기존 이벤트 리스너 제거(중복 방지)
-    loadBtn.removeEventListener('click', loadVideo);
-    startBtn.removeEventListener('click', startGame);
-    difficultySelect.removeEventListener('change', updateDifficulty);
-    
-    // 새 이벤트 리스너 추가
-    loadBtn.addEventListener('click', loadVideo);
-    startBtn.addEventListener('click', startGame);
-    difficultySelect.addEventListener('change', updateDifficulty);
-    
-    // 키 가이드에 키 활성화 이벤트 추가
-    setupKeyGuide();
-    
-    // 초기 난이도 설정 적용
-    updateDifficulty();
+// 유튜브 URL에서 비디오 ID 추출
+function extractVideoId(url) {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    if (match && match[2].length === 11) {
+        return match[2];
+    }
+    return null;
 }
 
 // 키 가이드 설정
@@ -152,94 +330,6 @@ function showLaneHitEffect(laneIndex) {
     }, 300);
 }
 
-// 플레이어 상태 변경 이벤트
-function onPlayerStateChange(event) {
-    if (event.data === YT.PlayerState.PLAYING && isPaused) {
-        isPaused = false;
-        audioStartTime = Date.now();
-        setupAudioAnalysis();
-    } else if (event.data === YT.PlayerState.PAUSED) {
-        isPaused = true;
-    } else if (event.data === YT.PlayerState.ENDED) {
-        endGame();
-    }
-}
-
-// 유튜브 비디오 로드
-function loadVideo() {
-    const urlInput = document.getElementById('youtube-url');
-    const url = urlInput.value;
-    
-    if (!url) {
-        alert('유튜브 URL을 입력해주세요.');
-        return;
-    }
-    
-    // URL에서 비디오 ID 추출
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-        alert('유효하지 않은 유튜브 URL입니다.');
-        return;
-    }
-    
-    console.log("비디오 ID 로드: " + videoId);
-    
-    // 플레이어가 준비되었는지 확인
-    if (player && typeof player.cueVideoById === 'function') {
-        player.cueVideoById(videoId);
-        player.pauseVideo();
-    } else {
-        console.error("YouTube 플레이어가 준비되지 않았습니다.");
-        // 플레이어가 준비되지 않은 경우 다시 초기화 시도
-        reinitializePlayer(videoId);
-    }
-    
-    document.getElementById('start-btn').disabled = false;
-}
-
-// 플레이어 재초기화 함수
-function reinitializePlayer(videoId) {
-    const playerContainer = document.getElementById('youtube-player');
-    // 기존 iframe 제거
-    while (playerContainer.firstChild) {
-        playerContainer.removeChild(playerContainer.firstChild);
-    }
-    
-    // 새 플레이어 생성
-    player = new YT.Player('youtube-player', {
-        height: '100%',
-        width: '100%',
-        videoId: videoId,
-        playerVars: {
-            'playsinline': 1,
-            'controls': 0,
-            'disablekb': 1,
-            'showinfo': 0,
-            'rel': 0,
-            'iv_load_policy': 3,
-            'fs': 0,
-            'origin': window.location.origin
-        },
-        events: {
-            'onReady': function(event) {
-                console.log("플레이어 재초기화 완료");
-                document.getElementById('start-btn').disabled = false;
-            },
-            'onStateChange': onPlayerStateChange
-        }
-    });
-}
-
-// 유튜브 URL에서 비디오 ID 추출
-function extractVideoId(url) {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-    const match = url.match(regExp);
-    if (match && match[2].length === 11) {
-        return match[2];
-    }
-    return null;
-}
-
 // 난이도 설정 업데이트
 function updateDifficulty() {
     const difficultySelect = document.getElementById('difficulty');
@@ -250,10 +340,20 @@ function updateDifficulty() {
     energyThreshold = settings.energyThreshold;
     beatInterval = settings.beatInterval;
     beatDetectionSensitivity = settings.beatDetectionSensitivity;
+    
+    console.log("난이도 변경:", difficulty, settings);
 }
 
 // 게임 시작
 function startGame() {
+    console.log("게임 시작 함수 호출됨");
+    
+    if (!player) {
+        console.error("유효한 YouTube 플레이어가 없습니다.");
+        alert("YouTube 플레이어가 초기화되지 않았습니다. 페이지를 새로고침해 주세요.");
+        return;
+    }
+    
     resetGame();
     
     // 카운트다운 시작
@@ -270,19 +370,29 @@ function startGame() {
         } else {
             clearInterval(countdown);
             countdownEl.remove();
-            player.playVideo();
-            isGameStarted = true;
+            
+            // 게임 시작 시 영상 재생
+            if (typeof player.playVideo === 'function') {
+                player.playVideo();
+                isGameStarted = true;
+                console.log("카운트다운 완료, 게임 시작");
+            } else {
+                console.error("playVideo 메서드를 찾을 수 없습니다.");
+                alert("비디오를 재생할 수 없습니다. 페이지를 새로고침해 주세요.");
+            }
         }
     }, 1000);
 }
 
 // 게임 종료
 function endGame() {
+    console.log("게임 종료");
+    
     isGameStarted = false;
     isPaused = true;
     
     // 최종 점수 및 정확도 표시
-    const accuracy = hitNotes > 0 ? Math.round((hitNotes / totalNotes) * 100) : 0;
+    const accuracy = totalNotes > 0 ? Math.round((hitNotes / totalNotes) * 100) : 0;
     document.getElementById('accuracy').textContent = accuracy;
     
     // 모든 노트 제거
@@ -296,6 +406,8 @@ function endGame() {
 
 // 게임 초기화
 function resetGame() {
+    console.log("게임 리셋");
+    
     notes = [];
     score = 0;
     combo = 0;
@@ -322,32 +434,40 @@ function resetGame() {
 
 // 오디오 분석 설정
 function setupAudioAnalysis() {
+    console.log("오디오 분석 설정");
+    
     if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        // 다양한 주파수 대역에 대한 분석기 생성
-        analyzer = audioContext.createAnalyser();
-        analyzer.fftSize = FFT_SIZE;
-        analyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
-        
-        bassAnalyzer = audioContext.createAnalyser();
-        bassAnalyzer.fftSize = FFT_SIZE;
-        bassAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
-        
-        midAnalyzer = audioContext.createAnalyser();
-        midAnalyzer.fftSize = FFT_SIZE;
-        midAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
-        
-        trebleAnalyzer = audioContext.createAnalyser();
-        trebleAnalyzer.fftSize = FFT_SIZE;
-        trebleAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
-        
-        // 각 분석기에 대한 버퍼 배열 생성
-        const bufferLength = analyzer.frequencyBinCount;
-        dataArray = new Uint8Array(bufferLength);
-        bassDataArray = new Uint8Array(bufferLength);
-        midDataArray = new Uint8Array(bufferLength);
-        trebleDataArray = new Uint8Array(bufferLength);
+        try {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // 다양한 주파수 대역에 대한 분석기 생성
+            analyzer = audioContext.createAnalyser();
+            analyzer.fftSize = FFT_SIZE;
+            analyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
+            
+            bassAnalyzer = audioContext.createAnalyser();
+            bassAnalyzer.fftSize = FFT_SIZE;
+            bassAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
+            
+            midAnalyzer = audioContext.createAnalyser();
+            midAnalyzer.fftSize = FFT_SIZE;
+            midAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
+            
+            trebleAnalyzer = audioContext.createAnalyser();
+            trebleAnalyzer.fftSize = FFT_SIZE;
+            trebleAnalyzer.smoothingTimeConstant = SMOOTHING_TIME_CONSTANT;
+            
+            // 각 분석기에 대한 버퍼 배열 생성
+            const bufferLength = analyzer.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            bassDataArray = new Uint8Array(bufferLength);
+            midDataArray = new Uint8Array(bufferLength);
+            trebleDataArray = new Uint8Array(bufferLength);
+            
+            console.log("오디오 컨텍스트 및 분석기 생성 완료");
+        } catch (error) {
+            console.error("오디오 컨텍스트 생성 중 오류 발생:", error);
+        }
     }
     
     // 오디오 분석 시작
@@ -356,10 +476,21 @@ function setupAudioAnalysis() {
 
 // 오디오 분석
 function analyzeAudio() {
-    if (isPaused) return;
+    if (isPaused || !isGameStarted) {
+        requestAnimationFrame(analyzeAudio);
+        return;
+    }
     
     // 유튜브 영상의 현재 재생 시간
-    const currentTime = player.getCurrentTime();
+    let currentTime = 0;
+    try {
+        if (player && typeof player.getCurrentTime === 'function') {
+            currentTime = player.getCurrentTime();
+        }
+    } catch (error) {
+        console.error("getCurrentTime 호출 중 오류:", error);
+    }
+    
     const elapsedTimeMs = Date.now() - audioStartTime + calibrationOffset;
     
     // 주파수 데이터 시뮬레이션 (실제 구현에서는 실제 오디오 데이터를 분석)
@@ -396,17 +527,17 @@ function simulateFrequencyData(currentTime) {
     const trebleValue = Math.round((treblePulse + trebleRandom) * 255);
     
     // 시뮬레이션된 데이터 배열 채우기
-    for (let i = 0; i < dataArray.length; i++) {
+    for (let i = 0; i < 1024; i++) { // 기본 길이로 1024 사용
         // 각 범위에 대한 다양한 주파수 분포
-        if (i < dataArray.length * 0.2) { // 베이스 범위
+        if (i < 204) { // 베이스 범위 (약 20%)
             bassDataArray[i] = bassValue;
             midDataArray[i] = Math.round(midValue * 0.3);
             trebleDataArray[i] = Math.round(trebleValue * 0.1);
-        } else if (i < dataArray.length * 0.6) { // 중간 범위
+        } else if (i < 614) { // 중간 범위 (약 40%)
             bassDataArray[i] = Math.round(bassValue * 0.3);
             midDataArray[i] = midValue;
             trebleDataArray[i] = Math.round(trebleValue * 0.4);
-        } else { // 고음 범위
+        } else { // 고음 범위 (약 40%)
             bassDataArray[i] = Math.round(bassValue * 0.1);
             midDataArray[i] = Math.round(midValue * 0.4);
             trebleDataArray[i] = trebleValue;
@@ -475,21 +606,27 @@ function detectBeats(currentTime, elapsedTimeMs) {
 // 에너지 계산
 function calculateEnergy(dataArray) {
     let sum = 0;
-    for (let i = 0; i < dataArray.length; i++) {
+    const length = Math.min(dataArray.length, 1024); // 안전을 위해 최대 길이 제한
+    
+    for (let i = 0; i < length; i++) {
         sum += dataArray[i] * dataArray[i];
     }
-    return sum / dataArray.length;
+    return sum / length;
 }
 
 // 평균 에너지 계산
 function calculateAverageEnergy(history, type) {
+    if (history.length === 0) return 0;
     return history.reduce((sum, item) => sum + item[type], 0) / history.length;
 }
 
 // 노트 생성
 function createNote(laneIndex, videoTime, elapsedTimeMs) {
-    const gameCanvas = document.getElementById('game-canvas');
     const lane = document.getElementById(`lane-${laneIndex + 1}`);
+    if (!lane) {
+        console.error(`레인 요소를 찾을 수 없음: lane-${laneIndex + 1}`);
+        return;
+    }
     
     const note = document.createElement('div');
     note.className = 'note';
@@ -514,15 +651,33 @@ function createNote(laneIndex, videoTime, elapsedTimeMs) {
 // 노트 업데이트
 function updateNotes() {
     const currentTime = Date.now();
-    const hitZonePosition = document.querySelector('.hit-zone').offsetTop;
+    const hitZone = document.querySelector('.hit-zone');
+    if (!hitZone) {
+        console.error("히트존 요소를 찾을 수 없음");
+        return;
+    }
+    
+    const hitZonePosition = hitZone.offsetTop;
     
     // 각 노트 업데이트
     notes.forEach((note, index) => {
         if (note.hit) return;
         
+        // 노트가 아직 DOM에 존재하는지 확인
+        if (!note.element || !note.element.parentNode) {
+            note.hit = true;
+            return;
+        }
+        
         // 경과 시간을 기준으로 노트 위치 계산
         const elapsedTime = (currentTime - note.startTime) / 1000; // 초 단위
-        const notePosition = (elapsedTime / noteSpeed) * document.getElementById('game-canvas').offsetHeight;
+        const gameCanvas = document.getElementById('game-canvas');
+        if (!gameCanvas) {
+            console.error("게임 캔버스 요소를 찾을 수 없음");
+            return;
+        }
+        
+        const notePosition = (elapsedTime / noteSpeed) * gameCanvas.offsetHeight;
         
         // 노트가 타격 영역을 통과했는지 확인
         if (notePosition >= hitZonePosition + 50) { // +50은 노트 높이를 고려
@@ -543,8 +698,14 @@ function updateNotes() {
 
 // 키 입력 처리
 function checkNoteHit(laneIndex) {
-    const hitZonePosition = document.querySelector('.hit-zone').offsetTop;
-    const hitZoneHeight = document.querySelector('.hit-zone').offsetHeight;
+    const hitZone = document.querySelector('.hit-zone');
+    if (!hitZone) {
+        console.error("히트존 요소를 찾을 수 없음");
+        return;
+    }
+    
+    const hitZonePosition = hitZone.offsetTop;
+    const hitZoneHeight = hitZone.offsetHeight;
     
     // 누른 레인에서 가장 가까운 노트 찾기
     let closestNote = null;
@@ -552,6 +713,12 @@ function checkNoteHit(laneIndex) {
     
     notes.forEach(note => {
         if (note.lane === laneIndex && !note.hit) {
+            // 노트가 아직 DOM에 존재하는지 확인
+            if (!note.element || !note.element.parentNode) {
+                note.hit = true;
+                return;
+            }
+            
             const noteElement = note.element;
             const notePosition = noteElement.offsetTop + (noteElement.offsetHeight / 2);
             const distance = Math.abs(notePosition - (hitZonePosition + (hitZoneHeight / 2)));
@@ -612,8 +779,11 @@ function checkNoteHit(laneIndex) {
 
 // 타격 피드백 표시
 function showHitFeedback(laneIndex, hitType) {
-    const gameCanvas = document.getElementById('game-canvas');
     const lane = document.getElementById(`lane-${laneIndex + 1}`);
+    if (!lane) {
+        console.error(`레인 요소를 찾을 수 없음: lane-${laneIndex + 1}`);
+        return;
+    }
     
     const feedback = document.createElement('div');
     feedback.className = `hit-${hitType}`;
@@ -636,18 +806,7 @@ function showHitFeedback(laneIndex, hitType) {
 }
 
 // 페이지 로드 시 초기화
-window.addEventListener('load', function() {
-    console.log("페이지 로드 완료");
-    
-    // YouTube API가 준비되면 onYouTubeIframeAPIReady가 자동으로 호출됨
-    // API가 이미 로드된 경우를 위한 대체
-    if (window.YT && window.YT.Player) {
-        console.log("YouTube API가 이미 로드됨");
-        onYouTubeIframeAPIReady();
-    } else {
-        console.log("YouTube API 로딩 대기 중...");
-    }
-    
-    // 디버그용 콘솔 로그
-    console.log("2222");
+window.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM 로드 완료, 게임 초기화");
+    initializeGame();
 });
