@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>유튜브 리듬게임</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="game-header">
+            <h1>유튜브 기반 리듬게임</h1>
+            <div class="controls">
+                <input type="text" id="youtube-url" placeholder="유튜브 URL 입력">
+                <button id="load-btn">영상 불러오기</button>
+                <button id="start-btn" disabled>게임 시작</button>
+                <div class="difficulty-controls">
+                    <label for="difficulty">난이도:</label>
+                    <select id="difficulty">
+                        <option value="easy">쉬움</option>
+                        <option value="normal" selected>보통</option>
+                        <option value="hard">어려움</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <div class="game-container">
+            <div id="youtube-player"></div>
+            <div id="game-canvas">
+                <div class="note-lanes">
+                    <div class="lane" id="lane-1"></div>
+                    <div class="lane" id="lane-2"></div>
+                    <div class="lane" id="lane-3"></div>
+                    <div class="lane" id="lane-4"></div>
+                </div>
+                <div class="hit-zone"></div>
+            </div>
+        </div>
+        
+        <div class="game-stats">
+            <div class="score">점수: <span id="score">0</span></div>
+            <div class="combo">콤보: <span id="combo">0</span></div>
+            <div class="accuracy">정확도: <span id="accuracy">0</span>%</div>
+        </div>
+        
+        <div class="key-guide">
+            <div class="key">D</div>
+            <div class="key">F</div>
+            <div class="key">J</div>
+            <div class="key">K</div>
+        </div>
+    </div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="script.js"></script>
+</body>
+</html>

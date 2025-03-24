@@ -1,0 +1,303 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background-color: #121212;
+    color: white;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.container {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.game-header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 15px;
+    gap: 10px;
+}
+
+#youtube-url {
+    padding: 10px;
+    width: 300px;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+button {
+    padding: 10px 15px;
+    background-color: #ff4500;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: #ff5722;
+}
+
+button:disabled {
+    background-color: #777;
+    cursor: not-allowed;
+}
+
+.difficulty-controls {
+    margin-left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+#difficulty {
+    padding: 8px;
+    border-radius: 4px;
+    border: none;
+    font-size: 16px;
+}
+
+.game-container {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+    position: relative;
+    height: 500px;
+}
+
+#youtube-player {
+    width: 48%;
+    height: 100%;
+    background-color: #000;
+}
+
+#game-canvas {
+    width: 48%;
+    height: 100%;
+    background-color: #1e1e1e;
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+}
+
+.note-lanes {
+    display: flex;
+    height: 100%;
+}
+
+.lane {
+    flex: 1;
+    border-right: 2px solid rgba(255, 255, 255, 0.2);
+    height: 100%;
+    position: relative;
+}
+
+.lane:last-child {
+    border-right: none;
+}
+
+.hit-zone {
+    position: absolute;
+    bottom: 80px;
+    width: 100%;
+    height: 5px;
+    background-color: #ff4500;
+    box-shadow: 0 0 10px #ff4500;
+    z-index: 10;
+}
+
+.game-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 20px;
+    font-size: 20px;
+    background-color: rgba(0, 0, 0, 0.3);
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.note {
+    position: absolute;
+    width: 80%;
+    height: 25px;
+    background-color: rgba(255, 69, 0, 0.8);
+    border-radius: 5px;
+    left: 10%;
+    top: -30px;
+    animation: note-fall linear;
+    box-shadow: 0 0 10px rgba(255, 69, 0, 0.5);
+}
+
+@keyframes note-fall {
+    from {
+        top: -30px;
+    }
+    to {
+        top: calc(100% - 85px);
+    }
+}
+
+.hit-perfect {
+    position: absolute;
+    bottom: 80px;
+    width: 80%;
+    height: 25px;
+    left: 10%;
+    background-color: rgba(0, 255, 0, 0.5);
+    border-radius: 5px;
+    animation: hit-feedback 0.3s forwards;
+    z-index: 20;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+}
+
+.hit-good {
+    position: absolute;
+    bottom: 80px;
+    width: 80%;
+    height: 25px;
+    left: 10%;
+    background-color: rgba(255, 255, 0, 0.5);
+    border-radius: 5px;
+    animation: hit-feedback 0.3s forwards;
+    z-index: 20;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+}
+
+.hit-miss {
+    position: absolute;
+    bottom: 80px;
+    width: 80%;
+    height: 25px;
+    left: 10%;
+    background-color: rgba(255, 0, 0, 0.5);
+    border-radius: 5px;
+    animation: hit-feedback 0.3s forwards;
+    z-index: 20;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+}
+
+@keyframes hit-feedback {
+    from {
+        opacity: 1;
+        transform: scale(1);
+    }
+    to {
+        opacity: 0;
+        transform: scale(1.2);
+    }
+}
+
+.countdown {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 80px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 0 10px rgba(255, 69, 0, 0.8);
+    z-index: 100;
+}
+
+.key-guide {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    gap: 20px;
+}
+
+.key {
+    width: 50px;
+    height: 50px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    transition: all 0.1s;
+}
+
+.key-active {
+    background-color: rgba(255, 255, 255, 0.8);
+    color: #000;
+    transform: translateY(5px);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+}
+
+/* 레인 표시기 */
+.lane-indicator {
+    position: absolute;
+    bottom: 20px;
+    width: 80%;
+    height: 50px;
+    left: 10%;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    font-weight: bold;
+    z-index: 5;
+}
+
+/* 타격 효과 */
+.hit-effect {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0) 70%);
+    opacity: 0;
+    z-index: 15;
+    pointer-events: none;
+    animation: hit-effect 0.3s ease-out;
+}
+
+@keyframes hit-effect {
+    0% {
+        opacity: 0.7;
+        transform: scale(0.5);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(1.5);
+    }
+}
